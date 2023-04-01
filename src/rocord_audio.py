@@ -1,4 +1,4 @@
-import os
+import os, json
 import sys
 import time
 import scipy
@@ -29,14 +29,73 @@ def check_device_direction(device):
         device_type.append('Output')
     return ' & '.join(device_type)
 
-def device_select():
+def dev_id_string(device):
+    return f"{device['name']} ({check_device_direction(device)})"
+
+def save_device_config(device_index):
+    config_folder = Path('fs/config')
+    config_folder.mkdir(parents=True, exist_ok=True)
+    config_file = config_folder / 'config.json'
+
+    devices = sd.query_devices()
+    device = devices[device_index]
+    device_config = {'idx': device_index, 'id_string': dev_id_string(device)}
+
+    with open(config_file, 'w') as f:
+        json.dump(device_config, f)
+
+def load_device_config():
+    config_folder = Path('fs/config')
+    config_file = config_folder / 'config.json'
+
+    if config_file.exists():
+        with open(config_file, 'r') as f:
+            device_config = json.load(f)
+        return device_config
+    else:
+        return None
+
+def user_select_input_device():
     devices = sd.query_devices()
     print("Available recording devices:")
-    for i, device in enumerate(devices):
-        print(f"{i}: {device['name']} ({check_device_direction(device)})")
+    for idx, device in enumerate(devices):
+        id_string = dev_id_string(device)
+        print(f"{idx}: {id_string}")
 
     device_index = int(input("Enter the index of the device you want to use for recording: "))
     return device_index
+
+def config_select_input_device():
+    config = load_device_config()
+    if config is None:
+        return None
+        
+    devices = sd.query_devices()
+    idx_config = config['idx']
+    id_string_config = config['id_string']
+
+    print(f"+++ config: {idx_config} - {id_string_config}")
+    if idx_config < len(devices):
+        device_config = devices[idx_config]
+        loaded_id_string = dev_id_string(device_config)
+        print(f"+++ loaded: {idx_config} - {loaded_id_string}")
+        if id_string_config == loaded_id_string:
+            print(f"+++ using previous device")
+            return idx_config
+        
+    return None
+
+def device_select():
+    dev_idx = config_select_input_device()
+    if dev_idx is not None:
+        print(f"+++ device selected form config: {dev_idx}")
+        return dev_idx
+
+    dev_idx = user_select_input_device()
+    save_device_config(dev_idx)
+    print(f"+++ device selected form user: {dev_idx}")
+    print(f"+++ config saved:D")
+    return dev_idx
 
 def get_device_info(device_index):
     device_info = sd.query_devices(device_index, 'input')
@@ -91,7 +150,13 @@ except KeyboardInterrupt:
     print(f"+++ Max value: {max_value}")
     print(f"+++ Min value: {min_value}")
 
-    scipy.io.wavfile.write(str(output_file), SAMPLE_RATE, recorded_data)
+    WHISPER_SAMPLERATE = 16000
+    # decimated_data = scipy.signal.decimate(recorded_data, 3)
+    # dec_shape = decimated_data.shape
+    # print(f"+++ Decimated data shape: {dec_shape}")
+
+    simple_downsample = recorded_data[::3,:]
+    scipy.io.wavfile.write(str(output_file), WHISPER_SAMPLERATE, simple_downsample)
     # sd.write_wav(str(output_file), recorded_data, SAMPLE_RATE)
     
     print(f"Audio saved to {output_file}")
